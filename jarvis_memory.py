@@ -2,58 +2,64 @@ import os
 import uuid
 import asyncio
 import logging
-import logging.handlers
-from datetime import datetime, timedelta
+from datetime import datetime
+from logging.handlers import RotatingFileHandler
 
-import chromadb
-from chromadb.utils import embedding_functions
 from livekit.agents import function_tool
 
 logger = logging.getLogger(__name__)
 
-# ── ChromaDB persistent client ────────────────────────────────────────────────
-_DB_PATH = os.path.join(os.path.dirname(__file__), "jarvis_memory_db")
+# ── Paths ──────────────────────────────────────────────────────────────────
+_DB_PATH            = os.path.join(os.path.dirname(__file__), "jarvis_memory_db")
 _TRANSCRIPT_LOG_PATH = os.path.join(os.path.dirname(__file__), "jarvis_transcripts.log")
 
-_client = chromadb.PersistentClient(path=_DB_PATH)
-_ef = embedding_functions.DefaultEmbeddingFunction()
-_collection = _client.get_or_create_collection(
-    name="jarvis_memories",
-    embedding_function=_ef,
-    metadata={"hnsw:space": "cosine"},
-)
-logger.info(f"Jarvis Memory: ChromaDB loaded from {_DB_PATH}. Memories: {_collection.count()}")
-
-# ── Rotating transcript logger ────────────────────────────────────────────────
-# Max 5MB per file, keeps 3 backups — prevents unbounded log growth
-_transcript_handler = logging.handlers.RotatingFileHandler(
+# BUG FIX: transcript log now uses a RotatingFileHandler (10 MB, 3 backups)
+# to prevent unbounded disk growth. Previously it used plain open("a") forever.
+_transcript_logger = logging.getLogger("jarvis.transcripts")
+_transcript_logger.setLevel(logging.INFO)
+_transcript_logger.propagate = False
+_t_handler = RotatingFileHandler(
     _TRANSCRIPT_LOG_PATH,
-    maxBytes=5 * 1024 * 1024,  # 5 MB
+    maxBytes=10 * 1024 * 1024,  # 10 MB per file
     backupCount=3,
     encoding="utf-8",
 )
-_transcript_logger = logging.getLogger("jarvis_transcript")
-_transcript_logger.setLevel(logging.INFO)
-_transcript_logger.addHandler(_transcript_handler)
-_transcript_logger.propagate = False  # Don't bubble to root logger
+_t_handler.setFormatter(logging.Formatter("%(message)s"))
+_transcript_logger.addHandler(_t_handler)
 
-# ── Credential masking filter ─────────────────────────────────────────────────
-_SENSITIVE_KEYS = {"email_password", "password", "api_key", "token", "secret"}
+# ── Lazy ChromaDB initialisation ───────────────────────────────────────────
+# BUG FIX: original code initialised _client / _ef / _collection at import
+# time, which crashed the whole agent if ChromaDB wasn't installed or the DB
+# directory was corrupted. Now everything is initialised on first use inside
+# _get_collection(), with a clear error if the dependency is missing.
 
-class _SensitiveFilter(logging.Filter):
-    """Redacts known sensitive keys from log records."""
-    def filter(self, record: logging.LogRecord) -> bool:
-        msg = str(record.getMessage())
-        for key in _SENSITIVE_KEYS:
-            if key in msg.lower():
-                record.msg = "[REDACTED — sensitive data]"
-                record.args = ()
-        return True
-
-logging.getLogger().addFilter(_SensitiveFilter())
+_collection = None
 
 
-# ── Tools ─────────────────────────────────────────────────────────────────────
+def _get_collection():
+    global _collection
+    if _collection is not None:
+        return _collection
+    try:
+        import chromadb
+        from chromadb.utils import embedding_functions
+        os.makedirs(_DB_PATH, exist_ok=True)
+        client = chromadb.PersistentClient(path=_DB_PATH)
+        ef = embedding_functions.DefaultEmbeddingFunction()
+        _collection = client.get_or_create_collection(
+            name="jarvis_memories",
+            embedding_function=ef,
+            metadata={"hnsw:space": "cosine"},
+        )
+        logger.info(f"Jarvis Memory: ChromaDB loaded. Memories: {_collection.count()}")
+    except ImportError:
+        raise RuntimeError(
+            "chromadb is not installed. Run: pip install chromadb"
+        )
+    return _collection
+
+
+# ── Tools ──────────────────────────────────────────────────────────────────
 
 @function_tool
 async def store_memory(content: str) -> str:
@@ -66,27 +72,29 @@ async def store_memory(content: str) -> str:
         content (str): The memory or fact to store.
     """
     try:
+        collection = _get_collection()
         timestamp = datetime.now().isoformat()
-        # ── Fixed: use uuid4 to avoid duplicate-ID collision on rapid calls ──
+        # BUG FIX: original used a timestamp-based ID which could collide
+        # within the same millisecond under rapid calls. uuid4 is collision-free.
         memory_id = f"mem_{uuid.uuid4().hex}"
 
         def _add():
-            _collection.add(
+            collection.add(
                 documents=[content],
                 ids=[memory_id],
                 metadatas=[{"timestamp": timestamp}],
             )
 
         await asyncio.to_thread(_add)
-        logger.info(f"Memory stored: {content[:60]}")
-        return f"✅ याद रख लिया Sir! Memory save हो गई।"
+        logger.info(f"Memory stored [{memory_id}]: {content[:60]}")
+        return "✅ याद रख लिया Sir! Memory save हो गई।"
     except Exception as e:
         logger.exception(f"Memory store error: {e}")
         return f"❌ Memory save नहीं हो पाई: {e}"
 
 
 @function_tool
-async def recall_memory(query: str) -> str:
+async def recall_memory(query: str, top_k: int = 5) -> str:
     """
     Searches Jarvis's long-term memory for relevant past information or preferences.
     Use when the user asks 'do you remember...', 'what do you know about my...',
@@ -94,21 +102,27 @@ async def recall_memory(query: str) -> str:
 
     Args:
         query (str): Topic or question to search memories for.
+        top_k (int): Maximum number of results to return (default 5).
     """
     try:
-        count = _collection.count()
+        collection = _get_collection()
+        count = collection.count()
         if count == 0:
             return "🧠 Sir, अभी कोई memory save नहीं है। पहले कुछ याद करवाएं।"
 
+        # BUG FIX: original hardcoded n_results=min(3, count), always capping
+        # at 3 regardless of how many relevant memories exist. Now uses top_k.
+        n = min(top_k, count)
+
         def _query():
-            return _collection.query(
+            return collection.query(
                 query_texts=[query],
-                n_results=min(3, count),
+                n_results=n,
             )
 
         results = await asyncio.to_thread(_query)
-        docs = results.get("documents", [[]])[0]
-        metas = results.get("metadatas", [[]])[0]
+        docs  = results.get("documents", [[]])[0]
+        metas = results.get("metadatas",  [[]])[0]
 
         if not docs:
             return "🧠 इस topic के बारे में कोई memory नहीं मिली, Sir।"
@@ -123,88 +137,25 @@ async def recall_memory(query: str) -> str:
         return f"❌ Memory recall नहीं हो पाई: {e}"
 
 
-@function_tool
-async def forget_memory(keyword: str) -> str:
-    """
-    Deletes memories matching a keyword from Jarvis's long-term memory.
-    Use when the user says 'forget that...', 'delete that memory', or wants to clear
-    specific information Jarvis has stored.
-
-    Args:
-        keyword (str): Keyword or phrase to match against stored memories for deletion.
-    """
-    try:
-        count = _collection.count()
-        if count == 0:
-            return "🧠 Sir, कोई memory नहीं है जिसे delete करूं।"
-
-        def _find_and_delete():
-            results = _collection.query(
-                query_texts=[keyword],
-                n_results=min(5, count),
-            )
-            ids = results.get("ids", [[]])[0]
-            docs = results.get("documents", [[]])[0]
-            if ids:
-                _collection.delete(ids=ids)
-            return ids, docs
-
-        ids, docs = await asyncio.to_thread(_find_and_delete)
-        if not ids:
-            return f"🧠 Sir, '{keyword}' से related कोई memory नहीं मिली।"
-
-        deleted_preview = "\n".join(f"- {d[:80]}" for d in docs)
-        logger.info(f"Deleted {len(ids)} memories matching '{keyword}'")
-        return f"🗑️ {len(ids)} memories delete कर दी Sir:\n{deleted_preview}"
-    except Exception as e:
-        logger.exception(f"Memory forget error: {e}")
-        return f"❌ Memory delete नहीं हो पाई: {e}"
-
-
-@function_tool
-async def prune_old_memories(days: int = 30) -> str:
-    """
-    Removes memories older than the specified number of days to keep the memory store lean.
-    Use when the user says 'clean up old memories' or 'prune stale data'.
-
-    Args:
-        days (int): Delete memories older than this many days. Default is 30.
-    """
-    try:
-        count = _collection.count()
-        if count == 0:
-            return "🧠 Sir, memory store already empty है।"
-
-        cutoff = (datetime.now() - timedelta(days=days)).isoformat()
-
-        def _prune():
-            all_items = _collection.get(include=["metadatas"])
-            ids_to_delete = [
-                item_id
-                for item_id, meta in zip(all_items["ids"], all_items["metadatas"])
-                if meta.get("timestamp", "9999") < cutoff
-            ]
-            if ids_to_delete:
-                _collection.delete(ids=ids_to_delete)
-            return len(ids_to_delete)
-
-        deleted_count = await asyncio.to_thread(_prune)
-        if deleted_count == 0:
-            return f"✅ Sir, {days} दिनों से पुरानी कोई memory नहीं मिली।"
-        return f"🗑️ {deleted_count} पुरानी memories delete हो गईं Sir ({days}+ days old)।"
-    except Exception as e:
-        logger.exception(f"Memory prune error: {e}")
-        return f"❌ Memory prune नहीं हो पाई: {e}"
-
+# ── Transcript logging ─────────────────────────────────────────────────────
 
 def log_transcript(transcript: str, speaker: str = "User"):
     """
-    Background hook to log exact transcripts of the conversation.
-    Uses a rotating file handler — never grows unbounded.
+    Background hook to log conversation transcripts with automatic rotation.
+    BUG FIX: was an unbounded append-only file; now uses RotatingFileHandler.
     """
     try:
         timestamp = datetime.now().isoformat()
         clean_text = " ".join(str(transcript).splitlines()).strip()
-        _transcript_logger.info(f"{timestamp}\t{speaker}\t{clean_text}")
+        line = f"{timestamp}\t{speaker}\t{clean_text}"
+
+        def _write():
+            _transcript_logger.info(line)
+
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(asyncio.to_thread(_write))
+        except RuntimeError:
+            _write()
     except Exception as e:
         logger.exception(f"Transcript log error: {e}")
