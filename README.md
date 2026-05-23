@@ -1,16 +1,23 @@
 <div align="center">
 
-# 🤖 JARVIS
+```
+     ██╗ █████╗ ██████╗ ██╗   ██╗██╗███████╗
+     ██║██╔══██╗██╔══██╗██║   ██║██║██╔════╝
+     ██║███████║██████╔╝██║   ██║██║███████╗
+██   ██║██╔══██║██╔══██╗╚██╗ ██╔╝██║╚════██║
+╚█████╔╝██║  ██║██║  ██║ ╚████╔╝ ██║███████║
+ ╚════╝ ╚═╝  ╚═╝╚═╝  ╚═╝  ╚═══╝  ╚═╝╚══════╝
+```
 
-### Autonomous Multimodal AI Assistant
-
-*Perception → Memory → Planning → Action*
+**Autonomous Multimodal AI Assistant**
 
 [![Python](https://img.shields.io/badge/Python-3.11+-blue?style=for-the-badge&logo=python)](https://python.org)
-[![Gemini](https://img.shields.io/badge/Gemini-2.5_Flash-black?style=for-the-badge)](https://deepmind.google/gemini)
-[![LiveKit](https://img.shields.io/badge/LiveKit-Agents-orange?style=for-the-badge)](https://livekit.io)
-[![Status](https://img.shields.io/badge/Status-Active_Development-green?style=for-the-badge)](https://github.com/siddharthhim/jarvis)
-[![License](https://img.shields.io/badge/License-MIT-red?style=for-the-badge)](LICENSE)
+[![LiveKit](https://img.shields.io/badge/LiveKit-Agents_v1.5-black?style=for-the-badge)](https://livekit.io)
+[![Gemini](https://img.shields.io/badge/Gemini-2.5_Flash-orange?style=for-the-badge)](https://ai.google.dev)
+[![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
+[![Status](https://img.shields.io/badge/Status-Active_Dev-brightgreen?style=for-the-badge)]()
+
+*Voice · Memory · Browser · Desktop · Research · Documents · Self-Extending*
 
 </div>
 
@@ -18,334 +25,308 @@
 
 ## What is Jarvis?
 
-Jarvis is not a chatbot. It is an autonomous AI operating assistant that perceives its environment, reasons about tasks, executes real actions, and improves itself over time.
+Jarvis is an autonomous AI assistant built in Python that goes far beyond a chatbot. It can hear you, remember you, control your desktop, browse the web autonomously, read your documents, send emails, and even write its own new tools on demand.
 
-It can hear your voice, control your desktop, browse the web, write and run code, conduct research, send emails, manage files, and now — plan multi-step goals, deploy specialist sub-agents in parallel, and reflect on its own performance to get better after every session.
+It runs on [LiveKit Agents v1.5](https://docs.livekit.io/agents/) and Google Gemini, using a modular architecture where every capability lives in its own file.
+
+```
+Perception → Memory → Planning → Action
+```
 
 ---
 
-## ✨ Core Features
+## Features
 
-### 🎙️ Voice AI
-Real-time voice conversations with VAD, STT, and TTS. Native audio streaming via LiveKit. Supports natural Hinglish conversation.
+### Voice AI
+- Real-time voice conversations via LiveKit WebRTC
+- Voice Activity Detection (VAD) with Silero
+- Speech-to-Text via Google Cloud (Chirp)
+- Text-to-Speech via Google Cloud (Indian English voice)
+- Native audio mode via Gemini Live API (`agentmultimodal.py`)
+- Hinglish conversational support
 
-### 🧠 Semantic Memory
-Long-term vector memory powered by ChromaDB and Sentence Transformers. Jarvis remembers what you tell it across sessions and can semantically recall relevant context.
+### Memory
+- Long-term vector memory with ChromaDB
+- Semantic search using sentence-transformer embeddings
+- Collision-proof UUIDs for every memory entry
+- Transcript logging across sessions
+- `inject_relevant_memories()` hook for proactive context injection
 
-### 🌐 Autonomous Browser Agent
-Full web automation via Playwright and browser-use. Jarvis can navigate sites, click, type, extract data, and complete multi-step web workflows without human input.
+### Browser Automation
+- Autonomous web browsing via `browser-use` + Playwright
+- DOM interaction — clicking, typing, form-filling, navigation
+- AI-guided task execution with 120s timeout guard
+- Browser process always cleaned up (no leaks)
 
-### 💻 Desktop & OS Control
-Opens apps, manages windows and files, controls keyboard and mouse, reads and writes the clipboard, takes screenshots, and monitors active windows.
+### Desktop & OS Control
+- Open and close applications
+- File and folder management
+- Keyboard and mouse control (PyAutoGUI + Pynput)
+- Clipboard read/write
+- Screenshots and active-window capture
+- Volume control
 
-### 🔍 Research & Intelligence
-Deep web research, Google dorking, breach checking, Arxiv and Scholar exploration, and real-time web search via Tavily.
+### Research & Intelligence
+- Deep web research via Tavily API
+- Google dorking tools
+- Scholar and arXiv exploration
+- Real-time web search
 
-### 📁 Document Intelligence
-Indexes and semantically searches PDFs, DOCX files, and Excel spreadsheets stored locally. Ask questions about your documents in natural language.
+### Document Intelligence
+- PDF, DOCX, XLSX, CSV, TXT indexing
+- Incremental re-indexing (unchanged files are skipped)
+- Semantic search over your local documents
+- Separate vector store from conversation memory
 
-### 🔐 Face Recognition Auth
-OpenCV-based face detection and recognition with an authentication GUI. Jarvis verifies who it's talking to before allowing sensitive operations.
+### Communication
+- Email automation (Gmail SMTP)
+- WhatsApp automation
+- YouTube playback control
 
-### 📡 System Monitoring
-Live CPU, RAM, battery, and disk diagnostics. Jarvis knows the state of your machine at all times.
+### Authentication
+- Face detection via OpenCV Haar Cascades
+- Face recognition via LBPH
+- Confidence-threshold authorization check
+- Face model stored locally (not committed to git)
 
-### 📧 Communication
-Sends emails and WhatsApp messages, controls YouTube playback, and downloads media.
-
-### 🧩 Self-Extending Architecture
-Jarvis can write its own tools. When it encounters a task it cannot handle, `jarvis_synthesizer` generates a new Python module, saves it to `jarvis_tools_custom/`, and the tool is hot-loaded automatically on the next startup.
-
----
-
-## 🆕 Advanced Modules
-
-### 🎯 Goal-Directed Reasoning — `jarvis_planner.py`
-
-Jarvis can now break complex goals into structured execution plans before acting.
-
-```
-User: "Research quantum computing and write a PDF summary"
-
-Jarvis:
-  Step 1 [web_search]      → Search for recent quantum computing news
-  Step 2 [forage_knowledge] → Deep-dive Arxiv and Scholar papers
-  Step 3 [store_memory]    → Save key findings to long-term memory
-  Step 4 [create_pdf]      → Generate a formatted PDF report
-```
-
-Plans persist to `jarvis_plans.json` and survive restarts. You can check progress, pause, or abandon a plan at any time.
-
-**Voice commands:** *"Create a plan to...", "Execute the plan", "What step are we on?", "Abandon the plan"*
-
----
-
-### 🔁 Self-Improvement Loop — `jarvis_reflector.py`
-
-Every tool call Jarvis makes is logged to `jarvis_action_log.jsonl` with its success/failure status. At any time you can ask Jarvis to reflect — it analyzes its recent behavior, identifies patterns in failures and inefficiencies, and writes concrete behavioral improvement rules to `self_notes.txt`.
-
-On the next startup, those notes are automatically injected into the system prompt. Jarvis gets measurably better the more you use it.
-
-```
-jarvis_action_log.jsonl  ←  every tool call logged here automatically
-        ↓
-reflect_on_performance() ←  Gemini analyzes patterns
-        ↓
-self_notes.txt           ←  improvement rules saved here
-        ↓
-agent.py startup         ←  notes injected into system prompt
-```
-
-**Voice commands:** *"Reflect on your performance", "What have you learned?", "Show action log", "Clear the log"*
+### Self-Extending Architecture
+- `synthesize_new_tool` — Jarvis writes new Python tools on request
+- Generated code is AST-validated and safety-checked before saving
+- Custom tools saved to `jarvis_tools_custom/`
 
 ---
 
-### 🤖 Multi-Agent Collaboration — `jarvis_orchestrator.py`
+## Architecture
 
-For complex tasks, Jarvis deploys specialist sub-agents in parallel using `asyncio.gather()` and synthesizes their outputs into one coherent answer.
+```
+jarvis/
+├── agent.py                  ← Main voice agent (STT → LLM → TTS pipeline)
+├── agentmultimodal.py        ← Native audio agent (Gemini Live API)
+│
+├── jarvis_memory.py          ← Long-term vector memory (ChromaDB)
+├── jarvis_doc_indexer.py     ← Document indexing & semantic search
+├── jarvis_browser_agent.py   ← Autonomous browser (Playwright + browser-use)
+├── jarvis_synthesizer.py     ← Self-extending tool generator
+│
+├── jarvis_screenshot.py      ← Screenshot capture
+├── jarvis_screenshare.py     ← Screen + window capture
+├── jarvis_clipboard.py       ← Clipboard read/write
+├── jarvis_system_info.py     ← CPU, RAM, battery, disk
+├── jarvis_ambient.py         ← Ambient task planner
+├── jarvis_forager.py         ← Deep knowledge foraging
+│
+├── keyboard_mouse_CTRL.py    ← Full keyboard + mouse control
+├── Jarvis_google_search.py   ← Web search + datetime
+├── jarvis_weather.py         ← Weather lookup
+├── jarvis_email.py           ← Email automation
+├── jarvis_whatsapp.py        ← WhatsApp automation
+├── jarvis_youtube.py         ← YouTube control
+├── jarvis_toolbox.py         ← Video download utilities
+│
+├── Jarvis_window_CTRL.py     ← Window / app control
+├── Jarvis_file_opner.py      ← File opener
+├── jarvis_pdf_creator.py     ← PDF generation
+│
+├── jarvis_auth_engine.py     ← Face recognition engine
+├── jarvis_auth_gui.py        ← Authentication GUI
+│
+├── google_dork.py            ← Google dorking tools
+├── Jarvis_prompts.py         ← System prompt definitions
+│
+├── jarvis_tools_custom/      ← Auto-generated tools (created at runtime)
+├── jarvis_memory_db/         ← ChromaDB: conversation memory
+├── jarvis_docs_db/           ← ChromaDB: document knowledge base
+└── assets/                   ← Face model data (NOT committed to git)
+```
 
-**Available agents:**
+---
 
-| Agent | Specialty |
+## Tech Stack
+
+| Layer | Technology |
 |---|---|
-| `ResearchAgent` | Academic sources, Arxiv, web research |
-| `BrowserAgent` | Live web navigation and data extraction |
-| `CoderAgent` | Python code, scripts, technical solutions |
-| `AnalystAgent` | Synthesis, summarization, report writing |
-
-```
-User: "Research LLM memory architectures and write example code"
-
-Jarvis deploys in parallel:
-  ├── ResearchAgent  → finds papers on MemGPT, LangMem, etc.
-  ├── CoderAgent     → writes a Python memory implementation
-  └── AnalystAgent   → synthesizes findings + code into a report
-
-All agents run simultaneously. Results combined into one answer.
-```
-
-**Voice commands:** *"Use multiple agents to...", "Research X and write code for Y", "What agents do you have?"*
+| Agent Framework | LiveKit Agents v1.5 |
+| LLM | Gemini 2.5 Flash |
+| Realtime Audio | Gemini Live API |
+| STT | Google Cloud STT (Chirp) |
+| TTS | Google Cloud TTS |
+| VAD | Silero |
+| Vector Memory | ChromaDB + Sentence Transformers |
+| Browser Automation | browser-use + Playwright + LangChain |
+| Desktop Automation | PyAutoGUI + Pynput + Win32 APIs |
+| Face Recognition | OpenCV (LBPH + Haar Cascades) |
+| Web Search | Tavily API |
+| PDF Generation | FPDF |
+| UI | CustomTkinter |
 
 ---
 
-## 🏗️ Architecture
+## Installation
 
-```
-Jarvis/
-├── Core Voice Pipeline
-│   ├── agent.py                  ← Main entry point
-│   └── agentmultimodal.py        ← Native audio version
-│
-├── Intelligence Layer
-│   ├── jarvis_planner.py         ← 🆕 Goal-directed reasoning
-│   ├── jarvis_reflector.py       ← 🆕 Self-improvement loop
-│   ├── jarvis_orchestrator.py    ← 🆕 Multi-agent collaboration
-│   └── jarvis_synthesizer.py     ← Self-extending tool creation
-│
-├── Memory & Knowledge
-│   ├── jarvis_memory.py          ← Long-term vector memory (ChromaDB)
-│   ├── jarvis_doc_indexer.py     ← Local document intelligence
-│   └── jarvis_forager.py         ← Academic research (Arxiv/Scholar)
-│
-├── Perception & Action
-│   ├── jarvis_browser_agent.py   ← Autonomous web browsing
-│   ├── keyboard_mouse_CTRL.py    ← Desktop input control
-│   ├── jarvis_window_CTRL.py     ← Window & app management
-│   ├── jarvis_screenshot.py      ← Screen capture
-│   └── jarvis_screenshare.py     ← Active window capture
-│
-├── Communication
-│   ├── jarvis_email.py
-│   ├── jarvis_whatsapp.py
-│   └── jarvis_youtube.py
-│
-├── Research & Intelligence
-│   ├── Jarvis_google_search.py
-│   ├── google_dork.py
-│   └── sentient.py               ← Person reconnaissance
-│
-├── Authentication
-│   ├── jarvis_auth_engine.py     ← Face recognition
-│   └── jarvis_auth_gui.py
-│
-├── Utilities
-│   ├── jarvis_system_info.py
-│   ├── jarvis_clipboard.py
-│   ├── jarvis_pdf_creator.py
-│   ├── jarvis_ambient.py
-│   ├── jarvis_weather.py
-│   └── jarvis_toolbox.py
-│
-└── Plugin Ecosystem
-    └── jarvis_tools_custom/      ← Auto-generated tools live here
-```
+### 1. Prerequisites
 
----
+- Python 3.11+
+- A [LiveKit Cloud](https://cloud.livekit.io) account (free)
+- A [Google AI Studio](https://aistudio.google.com/apikey) API key
+- A Google Cloud project with Speech-to-Text API enabled
 
-## ⚡ Tech Stack
+### 2. Clone the repository
 
-| Category | Technologies |
-|---|---|
-| AI / LLM | Gemini 2.0 Flash, Gemini 2.5 Flash Native Audio |
-| Agent Framework | LiveKit Agents |
-| Memory | ChromaDB, Sentence Transformers |
-| Browser Automation | Playwright, browser-use, LangChain |
-| Desktop Control | PyAutoGUI, Pynput, Win32 APIs |
-| Vision & Auth | OpenCV, Haar Cascades, LBPH Face Recognition |
-| Research | Tavily API, Arxiv, Google Scholar |
-| Utilities | Python AsyncIO, HTTPX, FPDF |
-| UI | CustomTkinter, Three.js |
-
----
-
-## 📦 Installation
-
-**1. Clone the repository**
 ```bash
 git clone https://github.com/siddharthhim/jarvis.git
 cd jarvis
 ```
 
-**2. Create and activate a virtual environment**
+### 3. Create a virtual environment
+
 ```bash
 python -m venv venv
 
 # Windows
 venv\Scripts\activate
 
-# Linux / macOS
+# macOS / Linux
 source venv/bin/activate
 ```
 
-**3. Install dependencies**
+### 4. Install dependencies
+
 ```bash
 pip install -r requirements.txt
 ```
 
-**4. Configure environment variables**
+For browser automation, install Playwright browsers:
 
-Create a `.env` file in the project root:
-```env
-GOOGLE_API_KEY=your_gemini_api_key
-LIVEKIT_URL=your_livekit_url
-LIVEKIT_API_KEY=your_livekit_api_key
-LIVEKIT_API_SECRET=your_livekit_api_secret
-TAVILY_API_KEY=your_tavily_key
-OPENWEATHER_API_KEY=your_openweather_key
-EMAIL=your_email@gmail.com
-EMAIL_PASSWORD=your_app_password
-```
-
-**5. Install Playwright browsers**
 ```bash
 playwright install chromium
 ```
 
+For face recognition, make sure you have `opencv-contrib-python` (not `opencv-python`):
+
+```bash
+pip install opencv-contrib-python
+```
+
+### 5. Configure environment variables
+
+Copy the example file and fill in your keys:
+
+```bash
+cp .env.example .env
+```
+
+```env
+# LiveKit
+LIVEKIT_URL=wss://your-project.livekit.cloud
+LIVEKIT_API_KEY=your_livekit_api_key
+LIVEKIT_API_SECRET=your_livekit_api_secret
+
+# Google AI (Gemini)
+GOOGLE_API_KEY=your_google_ai_studio_key
+
+# Google Cloud (STT / TTS) — path to service account JSON
+GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
+
+# Optional
+TAVILY_API_KEY=your_tavily_key
+OPENWEATHER_API_KEY=your_openweather_key
+EMAIL=your_gmail@gmail.com
+EMAIL_PASSWORD=your_gmail_app_password
+```
+
+> **Google Cloud credentials**: Go to Google Cloud Console → IAM & Admin → Service Accounts → Create Key → JSON. Enable the Speech-to-Text API on your project.
+
 ---
 
-## ▶️ Running Jarvis
+## Running Jarvis
 
-**Standard voice agent**
+### Standard voice agent (STT → Gemini LLM → TTS)
+
+```bash
+python agent.py console
+```
+
+### Multimodal native audio agent (Gemini Live API)
+
+```bash
+python agentmultimodal.py console
+```
+
+### Connect to LiveKit Agent Console (for browser-based testing)
+
 ```bash
 python agent.py dev
 ```
 
-**Multimodal native audio version**
-```bash
-python agentmultimodal.py dev
-```
+Then open the [Agent Console](https://docs.livekit.io/agents/start/console/) and set agent name to `jarvis`.
 
 ---
 
-## 🔥 Example Sessions
+## Example Interactions
 
-**Multi-step research task**
-```
-You:    "Research the latest breakthroughs in autonomous AI agents and create a PDF report"
+**Voice commands Jarvis understands:**
 
-Jarvis: Creates a plan with 4 steps
-        Executes: web search → academic research → memory store → PDF generation
-        Delivers a formatted report to your desktop
-```
-
-**Parallel multi-agent task**
-```
-You:    "Find the best Python async libraries and write me benchmark code"
-
-Jarvis: Deploys ResearchAgent + CoderAgent + AnalystAgent simultaneously
-        ResearchAgent finds asyncio, trio, anyio comparisons
-        CoderAgent writes benchmark scripts in parallel
-        AnalystAgent synthesizes everything into a final recommendation
-        Total time: ~8 seconds instead of sequential ~25 seconds
-```
-
-**Self-improvement in action**
-```
-You:    "Reflect on your performance"
-
-Jarvis: Analyzes last 15 tool calls
-        Identifies: 3 failed web searches due to vague queries
-        Writes rule: "When searching, I will use specific date ranges and site operators"
-        Saves to self_notes.txt → active from next session onward
-```
-
-**Desktop automation**
-```
-You:    "Open VS Code, navigate to my AI project, and run the tests"
-
-Jarvis: Opens VS Code
-        Finds the project folder
-        Opens the integrated terminal
-        Runs pytest
-        Reports results back via voice
-```
-
----
-
-## 📁 Auto-Generated Files
-
-These files are created automatically at runtime — do not manually edit them:
-
-| File | Purpose |
+| What you say | What Jarvis does |
 |---|---|
-| `jarvis_plans.json` | Active and completed goal plans |
-| `jarvis_action_log.jsonl` | Tool call history for self-improvement |
-| `self_notes.txt` | Jarvis's accumulated behavioral improvement notes |
-| `jarvis_transcripts.log` | Full conversation history |
-| `jarvis_memory_db/` | ChromaDB vector store |
-| `jarvis_tools_custom/` | AI-synthesized tool modules |
+| *"Remember that I prefer dark mode"* | Stores preference in long-term memory |
+| *"Open VS Code and start my project"* | Opens app, navigates to folder, runs project |
+| *"Search for recent papers on autonomous agents"* | Browses arXiv, summarises findings |
+| *"Index my documents"* | Scans Documents folder, builds semantic index |
+| *"What did I ask you to remember last week?"* | Recalls relevant memories semantically |
+| *"Create a tool that checks disk usage"* | Synthesizes and saves a new Python tool |
+| *"Send an email to John about tomorrow's meeting"* | Drafts and sends via Gmail |
+| *"Take a screenshot and describe what's on screen"* | Captures screen, analyses with Gemini |
 
 ---
 
-## 🛡️ Security & Safety
+## Security & Safety
 
-Jarvis is built for personal productivity, education, research, and ethical automation on systems you own and control.
+Jarvis is designed for personal productivity, education, and research on your own machine.
 
-It does not support unauthorized system access, surveillance of others, malicious automation, or illegal activity of any kind.
+- All desktop automation runs locally
+- Face data is stored as a local file and never uploaded
+- `assets/` is excluded from git (add to `.gitignore`)
+- Synthesized tools are AST-validated before being saved
+- Tool synthesis blocks `subprocess`, `socket`, `exec`, `eval`, and other dangerous patterns
+
+Jarvis does **not** support unauthorized access, malicious automation, or illegal activity.
 
 ---
 
-## 🤝 Contributing
+## Roadmap
 
-Contributions, bug reports, and feature ideas are welcome.
+- [ ] Centralized planning engine (decompose multi-step tasks before tool selection)
+- [ ] Multi-agent coordination (supervisor + specialist sub-agents)
+- [ ] Proactive memory injection before each LLM turn
+- [ ] Auto-load synthesized tools without restart
+- [ ] Local LLM support (Ollama)
+- [ ] Mobile companion app
+- [ ] Cloud memory synchronization
+- [ ] Task queue for background/ambient jobs
+
+---
+
+## Contributing
+
+Contributions, bug reports, and feature suggestions are welcome.
 
 1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/your-feature`)
-3. Commit your changes
-4. Open a pull request
+2. Create a feature branch: `git checkout -b feature/your-feature`
+3. Commit your changes: `git commit -m "Add your feature"`
+4. Push and open a pull request
 
 ---
 
-## 📜 License
+## License
 
-MIT License — see [LICENSE](LICENSE) for details.
+This project is licensed under the [MIT License](LICENSE).
 
 ---
 
 <div align="center">
 
-**Jarvis is an experimental step toward autonomous AI systems that interact with the real digital world.**
+*Jarvis is an experimental step toward autonomous AI systems that can perceive, remember, reason, and act in the real digital world.*
 
-*Built by [siddharthhim](https://github.com/siddharthhim)*
+**Built with Python · Powered by Gemini · Runs on LiveKit**
 
 </div>
