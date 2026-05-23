@@ -2,74 +2,69 @@ import os
 import asyncio
 import logging
 from livekit.agents import function_tool
+from browser_use import Agent, Browser
+from langchain_google_genai import ChatGoogleGenerativeAI
 from dotenv import load_dotenv
 
 load_dotenv()
+
 logger = logging.getLogger(__name__)
 
+# ── LLM init ──────────────────────────────────────────────────────────────
+# FIX: Removed ChatGoogleGenerativeAIWithProvider subclass — it added an
+# undeclared Pydantic field which caused a validation error on instantiation,
+# silently setting _llm = None and disabling all browser automation.
+try:
+    _llm = ChatGoogleGenerativeAI(
+        model="gemini-2.5-flash",
+        google_api_key=os.getenv("GOOGLE_API_KEY"),
+    )
+except Exception as e:
+    logger.error(f"Failed to initialize LLM for Browser Agent: {e}")
+    _llm = None
 
-def _get_llm():
-    """
-    Lazy-initialize the LLM so a missing API key only fails when the tool
-    is actually called, not at module-import time (which would crash the
-    entire agent startup).
-    """
-    from browser_use import Agent, Browser
-    from langchain_google_genai import ChatGoogleGenerativeAI
-
-    api_key = os.getenv("GOOGLE_API_KEY")
-    if not api_key:
-        raise EnvironmentError(
-            "GOOGLE_API_KEY not set — browser agent cannot initialise."
-        )
-
-    # Subclass needed to satisfy browser-use's provider field validation
-    class _ChatGoogleWithProvider(ChatGoogleGenerativeAI):
-        provider: str = "google"
-
-    return _ChatGoogleWithProvider(model="gemini-2.5-flash", api_key=api_key)
+# Max seconds a browser task is allowed to run before we give up
+_BROWSER_TIMEOUT_SECONDS = 120
 
 
 @function_tool
 async def web_automation_task(goal: str) -> str:
     """
     Performs autonomous web browsing tasks using AI and Playwright.
-    Use for tasks like 'fill out this form', 'search and summarise results',
-    'log in and fetch data', or any multi-step web workflow.
 
     Args:
-        goal (str): A plain-English description of the browsing task to complete.
+        goal (str): Natural language description of the web task to perform.
     """
-    # ── Lazy import so heavy Playwright deps don't slow startup ──────────────
-    try:
-        from browser_use import Agent, Browser
-    except ImportError:
-        return "❌ browser-use library not installed. Run: pip install browser-use"
+    if not _llm:
+        return "❌ Sir, browser capabilities not configured. Please check GOOGLE_API_KEY."
 
     logger.info(f"Browser Agent starting task: {goal}")
 
-    browser = None
+    browser = Browser()
     try:
-        llm = _get_llm()
-        browser = Browser()
-        agent = Agent(task=goal, llm=llm, browser=browser)
-        result = await agent.run()
+        # FIX: browser.close() is now in finally — always runs even on exception.
+        # FIX: asyncio.wait_for enforces a timeout so a stuck task can't block the event loop.
+        agent = Agent(task=goal, llm=_llm, browser=browser)
+
+        result = await asyncio.wait_for(
+            agent.run(),
+            timeout=_BROWSER_TIMEOUT_SECONDS,
+        )
 
         if result and hasattr(result, "final_result") and result.final_result():
-            return f"✅ Web Task Complete Sir. Result: {result.final_result()}"
-        return "✅ Task done Sir, but no specific data could be extracted."
+            return f"✅ Web Task Complete, Sir. Result: {result.final_result()}"
+        else:
+            return "✅ Task done, Sir, but could not extract specific data from the page."
 
-    except EnvironmentError as e:
-        logger.error(f"Browser Agent config error: {e}")
-        return f"❌ Configuration error: {e}"
+    except asyncio.TimeoutError:
+        logger.error(f"Browser Agent timed out after {_BROWSER_TIMEOUT_SECONDS}s for task: {goal}")
+        return f"❌ Sir, browser task timed out after {_BROWSER_TIMEOUT_SECONDS} seconds."
     except Exception as e:
         logger.error(f"Browser Agent Exception: {e}")
-        return f"❌ Error during web automation Sir: {e}"
+        return f"❌ Error during web automation, Sir: {e}"
     finally:
-        # ── Fixed: browser is ALWAYS closed, even on exceptions ───────────────
-        if browser is not None:
-            try:
-                await browser.close()
-                logger.info("Browser closed successfully.")
-            except Exception as close_err:
-                logger.warning(f"Browser close warning: {close_err}")
+        # FIX: This now always runs — no browser process leaks.
+        try:
+            await browser.close()
+        except Exception as close_err:
+            logger.warning(f"Browser close error (non-critical): {close_err}")

@@ -1,108 +1,89 @@
-import os
-import asyncio
 import logging
+import os
 from dotenv import load_dotenv
-from livekit import agents, rtc
+
+from livekit import agents
 from livekit.agents import AgentServer, AgentSession, Agent, room_io, cli
-from livekit.plugins import google, noise_cancellation, silero
+from livekit.plugins import google, silero
 
-# ── Optional / missing-module guard ───────────────────────────────────────
-# BUG FIX: same missing-import problem as agent.py — all module loads are
-# now guarded so the process starts even when optional modules are absent.
-
-def _try_import(fn):
+# Re-use the same safe tool loading from agent.py
+# Import everything that's available
+def _safe_import(module: str, *names):
     try:
-        return fn()
-    except (ImportError, ModuleNotFoundError) as e:
-        logging.getLogger("jarvis_multimodal").warning(f"Optional module unavailable: {e}")
-        return None
+        mod = __import__(module, fromlist=names)
+        return {n: getattr(mod, n) for n in names if hasattr(mod, n)}
+    except ImportError as e:
+        logging.getLogger(__name__).warning(f"Optional module '{module}' not found: {e}")
+        return {}
 
-global_person_recon    = _try_import(lambda: __import__("sentient", fromlist=["global_person_recon"]).global_person_recon)
-run_passive_dork       = _try_import(lambda: __import__("google_dork", fromlist=["run_passive_dork"]).run_passive_dork)
-check_account_breach   = _try_import(lambda: __import__("google_dork", fromlist=["check_account_breach"]).check_account_breach)
-web_search             = _try_import(lambda: __import__("Jarvis_google_search", fromlist=["web_search"]).web_search)
-get_current_datetime   = _try_import(lambda: __import__("Jarvis_google_search", fromlist=["get_current_datetime"]).get_current_datetime)
-get_weather            = _try_import(lambda: __import__("jarvis_weather", fromlist=["get_weather"]).get_weather)
-send_email             = _try_import(lambda: __import__("jarvis_email", fromlist=["send_email"]).send_email)
-send_whatsapp_message  = _try_import(lambda: __import__("jarvis_whatsapp", fromlist=["send_whatsapp_message"]).send_whatsapp_message)
-play_youtube           = _try_import(lambda: __import__("jarvis_youtube", fromlist=["play_youtube"]).play_youtube)
-download_youtube_video = _try_import(lambda: __import__("jarvis_toolbox", fromlist=["download_youtube_video"]).download_youtube_video)
+from jarvis_memory import store_memory, recall_memory
+from jarvis_doc_indexer import index_documents, search_documents
+from jarvis_browser_agent import web_automation_task
+from jarvis_synthesizer import synthesize_new_tool
+from jarvis_screenshot import tool_take_screenshot
+from jarvis_clipboard import read_clipboard, write_clipboard
+from jarvis_system_info import get_system_info
+from keyboard_mouse_CTRL import (
+    move_cursor_tool, mouse_click_tool, scroll_cursor_tool, type_text_tool,
+    press_key_tool, press_hotkey_tool, control_volume_tool, swipe_gesture_tool,
+)
+from jarvis_screenshare import capture_screen_tool, smart_window_ctrl
 
-_wctrl             = _try_import(lambda: __import__("Jarvis_window_CTRL", fromlist=["open", "close", "folder_file", "create_folder_tool"]))
-open_app           = getattr(_wctrl, "open",              None)
-close_window       = getattr(_wctrl, "close",             None)
-folder_file        = getattr(_wctrl, "folder_file",       None)
-create_folder_tool = getattr(_wctrl, "create_folder_tool", None)
+_optional = {}
+for mod, names in [
+    ("Jarvis_google_search", ("web_search", "get_current_datetime")),
+    ("jarvis_weather",       ("get_weather",)),
+    ("jarvis_email",         ("send_email",)),
+    ("jarvis_whatsapp",      ("send_whatsapp_message",)),
+    ("jarvis_youtube",       ("play_youtube",)),
+    ("jarvis_toolbox",       ("download_youtube_video",)),
+    ("Jarvis_window_CTRL",   ("open", "close", "folder_file", "create_folder_tool")),
+    ("Jarvis_file_opner",    ("Play_file",)),
+    ("jarvis_pdf_creator",   ("create_pdf",)),
+    ("jarvis_ambient",       ("save_ambient_plan",)),
+    ("jarvis_forager",       ("forage_knowledge",)),
+    ("sentient",             ("global_person_recon",)),
+    ("google_dork",          ("run_passive_dork", "check_account_breach")),
+]:
+    _optional.update(_safe_import(mod, *names))
 
-Play_file  = _try_import(lambda: __import__("Jarvis_file_opner",  fromlist=["Play_file"]).Play_file)
-create_pdf = _try_import(lambda: __import__("jarvis_pdf_creator", fromlist=["create_pdf"]).create_pdf)
-
-_km = _try_import(lambda: __import__("keyboard_mouse_CTRL", fromlist=[
-    "move_cursor_tool", "mouse_click_tool", "scroll_cursor_tool", "type_text_tool",
-    "press_key_tool", "press_hotkey_tool", "control_volume_tool", "swipe_gesture_tool",
-]))
-move_cursor_tool    = getattr(_km, "move_cursor_tool",    None)
-mouse_click_tool    = getattr(_km, "mouse_click_tool",    None)
-scroll_cursor_tool  = getattr(_km, "scroll_cursor_tool",  None)
-type_text_tool      = getattr(_km, "type_text_tool",      None)
-press_key_tool      = getattr(_km, "press_key_tool",      None)
-press_hotkey_tool   = getattr(_km, "press_hotkey_tool",   None)
-control_volume_tool = getattr(_km, "control_volume_tool", None)
-swipe_gesture_tool  = getattr(_km, "swipe_gesture_tool",  None)
-
-tool_take_screenshot = _try_import(lambda: __import__("jarvis_screenshot", fromlist=["tool_take_screenshot"]).tool_take_screenshot)
-
-_ss = _try_import(lambda: __import__("jarvis_screenshare", fromlist=["capture_screen_tool", "smart_window_ctrl"]))
-capture_screen_tool = getattr(_ss, "capture_screen_tool", None)
-smart_window_ctrl   = getattr(_ss, "smart_window_ctrl",   None)
-
-get_system_info      = _try_import(lambda: __import__("jarvis_system_info",   fromlist=["get_system_info"]).get_system_info)
-read_clipboard       = _try_import(lambda: __import__("jarvis_clipboard",     fromlist=["read_clipboard"]).read_clipboard)
-write_clipboard      = _try_import(lambda: __import__("jarvis_clipboard",     fromlist=["write_clipboard"]).write_clipboard)
-store_memory         = _try_import(lambda: __import__("jarvis_memory",        fromlist=["store_memory"]).store_memory)
-recall_memory        = _try_import(lambda: __import__("jarvis_memory",        fromlist=["recall_memory"]).recall_memory)
-save_ambient_plan    = _try_import(lambda: __import__("jarvis_ambient",       fromlist=["save_ambient_plan"]).save_ambient_plan)
-index_documents      = _try_import(lambda: __import__("jarvis_doc_indexer",   fromlist=["index_documents"]).index_documents)
-search_documents     = _try_import(lambda: __import__("jarvis_doc_indexer",   fromlist=["search_documents"]).search_documents)
-web_automation_task  = _try_import(lambda: __import__("jarvis_browser_agent", fromlist=["web_automation_task"]).web_automation_task)
-synthesize_new_tool  = _try_import(lambda: __import__("jarvis_synthesizer",   fromlist=["synthesize_new_tool"]).synthesize_new_tool)
-forage_knowledge     = _try_import(lambda: __import__("jarvis_forager",       fromlist=["forage_knowledge"]).forage_knowledge)
-
-try:
-    from Jarvis_prompts import instructions_prompt, Reply_prompts
-except (ImportError, ModuleNotFoundError):
-    instructions_prompt = (
-        "You are Jarvis, an advanced autonomous AI assistant. "
-        "Help the user with any task using your available tools."
-    )
-    Reply_prompts = "Keep responses concise and action-oriented."
+_prompts = _safe_import("Jarvis_prompts", "instructions_prompt", "Reply_prompts")
 
 load_dotenv()
 logger = logging.getLogger("jarvis_multimodal")
 logger.setLevel(logging.INFO)
 
-JARVIS_TOOLS = [t for t in [
-    global_person_recon, run_passive_dork, check_account_breach,
-    web_search, get_current_datetime, get_weather,
-    send_email, send_whatsapp_message,
-    play_youtube, download_youtube_video,
-    open_app, close_window, folder_file, create_folder_tool, Play_file, create_pdf,
+JARVIS_TOOLS = [
+    store_memory, recall_memory,
+    index_documents, search_documents,
+    web_automation_task, synthesize_new_tool,
+    tool_take_screenshot, capture_screen_tool, smart_window_ctrl,
+    get_system_info, read_clipboard, write_clipboard,
     move_cursor_tool, mouse_click_tool, scroll_cursor_tool, type_text_tool,
     press_key_tool, press_hotkey_tool, control_volume_tool, swipe_gesture_tool,
-    tool_take_screenshot, capture_screen_tool, smart_window_ctrl,
-    get_system_info, read_clipboard, write_clipboard, store_memory, recall_memory,
-    save_ambient_plan, index_documents, search_documents,
-    web_automation_task, synthesize_new_tool, forage_knowledge,
-] if t is not None]
+    *[t for t in _optional.values() if t is not None],
+]
 
-logger.info(f"Loaded {len(JARVIS_TOOLS)} tools.")
+logger.info(f"Multimodal JARVIS loaded {len(JARVIS_TOOLS)} tools.")
+
+_instructions = _prompts.get("instructions_prompt", "")
+_replies      = _prompts.get("Reply_prompts", "")
+
+JARVIS_INSTRUCTIONS = f"""
+You are JARVIS — an advanced multimodal autonomous AI assistant.
+You can see, hear, and act. You have full desktop, browser, memory, and research capabilities.
+Be concise in voice responses. Use Hinglish naturally when responding.
+{_instructions}
+{_replies}
+""".strip()
 
 
-class JarvisAssistant(Agent):
+class JarvisMultimodalAgent(Agent):
+    """Jarvis agent using Gemini Live API for native speech-to-speech."""
+
     def __init__(self) -> None:
-        full_instructions = f"{instructions_prompt}\n\n{Reply_prompts}"
         super().__init__(
-            instructions=full_instructions,
+            instructions=JARVIS_INSTRUCTIONS,
             tools=JARVIS_TOOLS,
         )
 
@@ -111,53 +92,34 @@ server = AgentServer()
 
 
 @server.rtc_session(agent_name="jarvis-multimodal")
-async def jarvis_agent(ctx: agents.JobContext):
+async def jarvis_multimodal_session(ctx: agents.JobContext):
     logger.info(f"🚀 Multimodal JARVIS online in room: {ctx.room.name}")
+
     await ctx.connect()
 
     session = AgentSession(
-        llm=google.beta.realtime.RealtimeModel(
-            model="gemini-2.0-flash-exp",
-            voice="charon",
-            temperature=0.8,
+        # Gemini Live API — native speech-to-speech, no STT/TTS needed separately
+        llm=google.realtime.RealtimeModel(
+            model="gemini-2.5-flash",   # stable model — NOT the deprecated -exp variant
+            voice="Charon",
         ),
         vad=silero.VAD.load(),
     )
 
     await session.start(
         room=ctx.room,
-        agent=JarvisAssistant(),
+        agent=JarvisMultimodalAgent(),
         room_options=room_io.RoomOptions(
             audio_input=room_io.AudioInputOptions(
-                noise_cancellation=lambda params: (
-                    noise_cancellation.BVCTelephony()
-                    if params.participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP
-                    else noise_cancellation.BVC()
-                ),
+                # Noise cancellation — uncomment after: pip install livekit-plugins-ai-coustics
+                # noise_cancellation=ai_coustics.audio_enhancement(),
             ),
         ),
     )
 
     await session.generate_reply(
-        instructions="Greet the user and report that all modules are online."
+        instructions="Greet the user. Say 'Multimodal systems online. All modules integrated and ready, Sir.'"
     )
-
-    # BUG FIX: same infinite-poll bug as agent.py — now event-driven.
-    disconnected = asyncio.Event()
-
-    @ctx.room.on("disconnected")
-    def _on_disconnect(*_):
-        disconnected.set()
-
-    while not disconnected.is_set():
-        try:
-            await asyncio.wait_for(disconnected.wait(), timeout=60)
-        except asyncio.TimeoutError:
-            if not ctx.room.is_connected:
-                logger.warning("Room appears disconnected without event — exiting loop.")
-                break
-
-    logger.info("Room disconnected. JARVIS shutting down.")
 
 
 if __name__ == "__main__":
